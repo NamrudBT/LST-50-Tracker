@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Longevity & Strength Tracker (LST-50)</title>
+    <title>LST-50 Tracker</title>
     <!-- Load Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom styles for aesthetic and readability */
         :root {
-            --primary-color: #2563eb; /* Blue 600 */
-            --secondary-color: #f59e0b; /* Amber 500 */
-            --bg-color: #f8fafc; /* Slate 50 */
+            --primary-color: #2563eb; 
+            --secondary-color: #f59e0b; 
+            --bg-color: #f8fafc; 
         }
 
         body {
@@ -36,7 +36,7 @@
         }
 
         .btn-primary:hover {
-            background-color: #1d4ed8; /* Blue 700 */
+            background-color: #1d4ed8; 
         }
 
         .tab-active {
@@ -47,7 +47,7 @@
 
         /* Styling for the log entries */
         .log-entry:nth-child(even) {
-            background-color: #f1f5f9; /* Slate 100 */
+            background-color: #f1f5f9; 
         }
         
         /* Loading overlay for API calls */
@@ -279,12 +279,14 @@
 
     <!-- Firebase SDK Imports -->
     <script type="module">
+        // --- Import Firebase libraries first ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, where, writeBatch, runTransaction, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, orderBy, runTransaction, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // IMPORTANT: Global variables provided by the environment
+        // --- Global variables provided by the environment, safely retrieved ---
+        // This defensive check prevents the app from crashing on a blank screen if the variables are undefined.
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
@@ -292,31 +294,15 @@
         let db;
         let auth;
         let userId = 'loading';
+        let isFirebaseReady = false;
 
         const loadingOverlay = document.getElementById('loading-overlay');
         const authStatus = document.getElementById('auth-status');
         const rootPath = `/artifacts/${appId}`;
 
-        // Utility function for exponential backoff retry (for API calls outside the scope of this app)
-        const fetchWithRetry = async (url, options, maxRetries = 3) => {
-            for (let i = 0; i < maxRetries; i++) {
-                try {
-                    const response = await fetch(url, options);
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    return response;
-                } catch (error) {
-                    if (i === maxRetries - 1) throw error;
-                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
-                    console.warn(`Attempt ${i + 1} failed. Retrying in ${delay}ms...`, error);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            }
-        };
-
         // --- 1. FIREBASE INITIALIZATION AND AUTHENTICATION ---
         const initializeFirebase = async () => {
             if (!firebaseConfig) {
-                console.error("Firebase config is missing.");
                 authStatus.textContent = "Status: ERROR (Config Missing)";
                 loadingOverlay.classList.add('hidden');
                 return;
@@ -339,6 +325,7 @@
                     if (user) {
                         userId = user.uid;
                         authStatus.textContent = `Status: Connected | User ID: ${userId}`;
+                        isFirebaseReady = true;
                         loadDataListeners(); // Start listening for data changes
                     } else {
                         userId = 'anonymous';
@@ -353,33 +340,27 @@
             }
         };
 
-        // --- 2. DATA MANAGEMENT FUNCTIONS ---
+        // --- 2. DATA MANAGEMENT FUNCTIONS (same logic as before) ---
 
         const getWorkoutCollection = (uid) => collection(db, `${rootPath}/users/${uid}/workouts`);
         const getHabitDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/habits`, date);
         const getMetricsDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/metrics`, date);
-        const getDailySummaryDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/dailySummary`, date);
 
-
-        // Save a workout session
         const saveWorkoutSession = async (data) => {
-            if (userId === 'loading' || !db) return;
+            if (!isFirebaseReady) throw new Error("Database not initialized.");
             try {
-                const workoutRef = getWorkoutCollection(userId);
-                const docRef = await addDoc(workoutRef, {
+                const docRef = await addDoc(getWorkoutCollection(userId), {
                     ...data,
                     timestamp: new Date(),
-                    date: data.date, // ISO date string
+                    date: data.date, 
                 });
-                console.log("Workout logged successfully with ID: ", docRef.id);
-                // Also update health metrics if they were logged in the workout form
                 if (data.weight || data.systolic || data.diastolic) {
                     await saveHealthMetric({
                         date: data.date,
                         weight: data.weight,
                         systolic: data.systolic,
                         diastolic: data.diastolic
-                    }, 'WorkoutForm');
+                    });
                 }
             } catch (e) {
                 console.error("Error adding workout document: ", e);
@@ -387,22 +368,19 @@
             }
         };
 
-        // Save daily habits and metrics
         const saveHabitsAndMetrics = async (habitData, metricData) => {
-            if (userId === 'loading' || !db) return;
+            if (!isFirebaseReady) throw new Error("Database not initialized.");
             const date = habitData.date;
             
             try {
                 await runTransaction(db, async (transaction) => {
-                    // 1. Save Habits
                     const habitRef = getHabitDocRef(userId, date);
                     transaction.set(habitRef, { 
                         ...habitData, 
                         timestamp: new Date(),
-                        date: date // Store as ISO date string for query
+                        date: date 
                     }, { merge: true });
 
-                    // 2. Save Metrics (if provided)
                     if (metricData.weight || metricData.systolic || metricData.diastolic) {
                         const metricRef = getMetricsDocRef(userId, date);
                         transaction.set(metricRef, {
@@ -412,25 +390,21 @@
                         }, { merge: true });
                     }
                 });
-                console.log("Habits and Metrics recorded successfully for: ", date);
             } catch (e) {
                 console.error("Transaction failed: ", e);
                 throw new Error("Failed to record daily progress.");
             }
         };
 
-        // Save health metric (used internally by workout log)
         const saveHealthMetric = async (metricData) => {
-             if (userId === 'loading' || !db) return;
+             if (!isFirebaseReady) return;
              const date = metricData.date;
              try {
-                const metricRef = getMetricsDocRef(userId, date);
-                await setDoc(metricRef, {
+                await setDoc(getMetricsDocRef(userId, date), {
                     ...metricData,
                     timestamp: new Date(),
                     date: date,
                 }, { merge: true });
-                console.log("Health metrics updated for: ", date);
             } catch (e) {
                 console.error("Error updating health metrics: ", e);
             }
@@ -458,11 +432,12 @@
 
                     tab.classList.add('tab-active');
                     document.getElementById(tab.dataset.tab).classList.remove('hidden');
-                    lucide.createIcons(); // Re-create icons on the newly visible tab
+                    lucide.createIcons(); 
                 });
             });
 
             // Initialize Firebase
+            loadingOverlay.classList.remove('hidden');
             initializeFirebase();
         });
 
@@ -525,7 +500,7 @@
                     weight: parseFloat(entry.querySelector('.exercise-weight').value || 0),
                     rpe: parseInt(entry.querySelector('.exercise-rpe').value || 0),
                 };
-            }).filter(ex => ex.name); // Only log exercises with a name
+            }).filter(ex => ex.name); 
 
             const workoutData = {
                 date,
@@ -569,9 +544,7 @@
                 water: document.getElementById('water').checked,
             };
             
-            // Assume the user may also want to log latest weight/BP when logging habits
-            // I will use placeholder metric data here as we don't have separate metric inputs on the habit tab.
-            const metricData = {};
+            const metricData = {}; // No metric inputs on habit tab
 
             const messageEl = document.getElementById('habit-message');
             messageEl.classList.remove('hidden', 'text-green-600', 'text-red-600');
@@ -585,7 +558,6 @@
                 messageEl.classList.add('text-red-600');
             } finally {
                 loadingOverlay.classList.add('hidden');
-                // The onSnapshot listener will update the dashboard
             }
         });
 
@@ -593,7 +565,7 @@
         // --- 4. DATA LISTENERS AND RENDERING ---
 
         const loadDataListeners = () => {
-            if (userId === 'loading' || !db) return;
+            if (!isFirebaseReady) return;
 
             // Workout Listener (for Recent Workouts)
             const workoutQuery = query(getWorkoutCollection(userId), orderBy("timestamp", "desc"));
@@ -633,7 +605,6 @@
                 return;
             }
 
-            // Display up to 5 recent workouts
             workouts.slice(0, 5).forEach(workout => {
                 const date = new Date(workout.date).toLocaleDateString();
                 const totalExercises = workout.exercises ? workout.exercises.length : 0;
@@ -655,7 +626,6 @@
                     </div>
                 `;
                 
-                // Toggle details visibility
                 workoutDiv.querySelector('.view-details-btn').addEventListener('click', (e) => {
                     const details = workoutDiv.querySelector('.exercise-details');
                     details.classList.toggle('hidden');
@@ -692,9 +662,8 @@
             const body = document.getElementById('habit-compliance-body');
             body.innerHTML = '';
             
-            // Get last 7 unique dates
             const uniqueDates = Array.from(new Set(habits.map(h => h.date)))
-                .sort((a, b) => new Date(b) - new Date(a)) // Sort Descending
+                .sort((a, b) => new Date(b) - new Date(a)) 
                 .slice(0, 7);
             
             if (uniqueDates.length === 0) {
@@ -703,7 +672,7 @@
             }
 
             uniqueDates.forEach(dateStr => {
-                const habit = habits.find(h => h.date === dateStr); // Should only be one per date
+                const habit = habits.find(h => h.date === dateStr); 
                 
                 const dateDisplay = new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                 
@@ -726,7 +695,6 @@
                 body.appendChild(row);
             });
             
-            // Re-create icons for the new table content
             lucide.createIcons();
         };
 
@@ -734,54 +702,46 @@
             const streakCounter = document.getElementById('streak-counter');
             let streak = 0;
 
-            // Map habits to a more usable object keyed by date (ISO string)
             const habitsByDate = habits.reduce((acc, h) => {
                 acc[h.date] = h;
                 return acc;
             }, {});
 
-            // Get a sorted list of all dates logged
-            const sortedDates = Object.keys(habitsByDate).sort(); // Sort Ascending
-
             let currentDate = new Date();
             currentDate.setHours(0, 0, 0, 0);
 
-            // Function to get previous day ISO string
             const getPreviousDay = (date) => {
                 const prev = new Date(date);
                 prev.setDate(prev.getDate() - 1);
                 return prev.toISOString().split('T')[0];
             };
 
-            // Check yesterday's date first, as today might not be logged yet
-            let checkDate = currentDate;
-
-            // If today's date has passed, check today's date, otherwise check yesterday's date
-            // Start check from the current day's date string
-            let checkDateStr = checkDate.toISOString().split('T')[0];
-
-            // 1. Check if today's habits are complete. If so, start the streak count.
+            let checkDateStr = currentDate.toISOString().split('T')[0];
+            let isTodayComplete = false;
+            
+            // Check today
             if (habitsByDate[checkDateStr] && 
                 habitsByDate[checkDateStr].noSmoke && 
                 habitsByDate[checkDateStr].noAlcohol && 
                 habitsByDate[checkDateStr].mobility && 
                 habitsByDate[checkDateStr].water) {
                 streak = 1;
+                isTodayComplete = true;
+            } 
+
+            // Check yesterday and backwards
+            if (!isTodayComplete) {
+                checkDateStr = getPreviousDay(currentDate);
             } else {
-                // If today is not complete, check yesterday
-                checkDateStr = getPreviousDay(checkDate);
+                checkDateStr = getPreviousDay(new Date(checkDateStr)); // Start from the day before today
             }
 
-            // 2. Iterate backwards from the start date (either today or yesterday)
+
             while (habitsByDate[checkDateStr]) {
                 const h = habitsByDate[checkDateStr];
                 if (h.noSmoke && h.noAlcohol && h.mobility && h.water) {
-                    // Only increment if we didn't already count today
-                    if (streak > 0 || checkDateStr !== currentDate.toISOString().split('T')[0]) {
-                        streak++;
-                    }
+                    streak++;
                 } else {
-                    // Streak broken
                     break;
                 }
                 checkDateStr = getPreviousDay(new Date(checkDateStr));
