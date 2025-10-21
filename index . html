@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Longevity & Strength Tracker (LST-50)</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for aesthetic and readability */
+        :root {
+            --primary-color: #2563eb; /* Blue 600 */
+            --secondary-color: #f59e0b; /* Amber 500 */
+            --bg-color: #f8fafc; /* Slate 50 */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            transition: background-color 0.2s;
+        }
+
+        .btn-primary:hover {
+            background-color: #1d4ed8; /* Blue 700 */
+        }
+
+        .tab-active {
+            border-bottom: 4px solid var(--primary-color);
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        /* Styling for the log entries */
+        .log-entry:nth-child(even) {
+            background-color: #f1f5f9; /* Slate 100 */
+        }
+        
+        /* Loading overlay for API calls */
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .section-heading {
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 0.5rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+    <!-- Load Lucide icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="min-h-screen">
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="hidden">
+        <div class="spinner"></div>
+        <p class="mt-4 text-gray-700">Loading data and securing connection...</p>
+    </div>
+
+    <!-- Main Application Container -->
+    <div class="max-w-4xl mx-auto p-4 md:p-8">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-bold text-gray-800">LST-50 Tracker</h1>
+            <p id="auth-status" class="text-sm text-gray-500 mt-1">Status: Initializing...</p>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex justify-around bg-white p-2 rounded-xl shadow-lg mb-6">
+            <button data-tab="dashboard" class="tab-btn p-3 w-1/3 text-gray-600 transition duration-150 tab-active">
+                <span data-lucide="layout-dashboard" class="w-5 h-5 inline-block mr-1 align-sub"></span> Dashboard
+            </button>
+            <button data-tab="workout" class="tab-btn p-3 w-1/3 text-gray-600 transition duration-150">
+                <span data-lucide="dumbbell" class="w-5 h-5 inline-block mr-1 align-sub"></span> Workout Log
+            </button>
+            <button data-tab="habits" class="tab-btn p-3 w-1/3 text-gray-600 transition duration-150">
+                <span data-lucide="check-square" class="w-5 h-5 inline-block mr-1 align-sub"></span> Daily Habits
+            </button>
+        </nav>
+
+        <!-- Tab Content Containers -->
+        <main>
+            <!-- 1. Dashboard Tab -->
+            <section id="dashboard" class="tab-content">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4 section-heading">Progress Overview</h2>
+                
+                <!-- Streak and Metrics Summary -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                    <div class="card p-6 text-center bg-green-500 text-white">
+                        <p class="text-5xl font-extrabold" id="streak-counter">0</p>
+                        <p class="text-sm mt-1">Habit Streak (Days)</p>
+                    </div>
+                    <div class="card p-6 text-center">
+                        <p class="text-2xl font-bold text-gray-800" id="latest-weight">--</p>
+                        <p class="text-sm text-gray-500 mt-1">Latest Weight (lbs)</p>
+                    </div>
+                    <div class="card p-6 text-center">
+                        <p class="text-2xl font-bold text-gray-800" id="latest-bp">--</p>
+                        <p class="text-sm text-gray-500 mt-1">Latest BP (systolic/diastolic)</p>
+                    </div>
+                </div>
+
+                <!-- Latest Workout Log -->
+                <h3 class="text-xl font-medium text-gray-700 mb-3 section-heading">Recent Workouts</h3>
+                <div id="recent-workouts-list" class="space-y-2 card p-4">
+                    <p class="text-gray-500 text-center">No workouts logged yet. Start training!</p>
+                </div>
+
+                <!-- Habit Log -->
+                <h3 class="text-xl font-medium text-gray-700 mt-8 mb-3 section-heading">Last 7 Days Habit Compliance</h3>
+                <div class="card p-4 overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="p-2 text-left text-gray-600">Date</th>
+                                <th class="p-2 text-center text-gray-600">No Smoke</th>
+                                <th class="p-2 text-center text-gray-600">No Drink</th>
+                                <th class="p-2 text-center text-gray-600">Mobility</th>
+                                <th class="p-2 text-center text-gray-600">Water</th>
+                            </tr>
+                        </thead>
+                        <tbody id="habit-compliance-body" class="divide-y divide-gray-200">
+                            <!-- Habit compliance rows will be injected here -->
+                            <tr><td colspan="5" class="text-center py-4 text-gray-500">Loading habit data...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </section>
+
+            <!-- 2. Workout Log Tab -->
+            <section id="workout" class="tab-content hidden">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4 section-heading">Log a Training Session</h2>
+                <div class="card p-6">
+                    <form id="workout-form" class="space-y-4">
+                        <div>
+                            <label for="workout-date" class="block text-sm font-medium text-gray-700">Date</label>
+                            <input type="date" id="workout-date" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" value="" required>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="weight" class="block text-sm font-medium text-gray-700">Body Weight (lbs)</label>
+                                <input type="number" id="weight" placeholder="190" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                            </div>
+                            <div>
+                                <label for="systolic" class="block text-sm font-medium text-gray-700">Systolic BP</label>
+                                <input type="number" id="systolic" placeholder="120" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                            </div>
+                            <div>
+                                <label for="diastolic" class="block text-sm font-medium text-gray-700">Diastolic BP</label>
+                                <input type="number" id="diastolic" placeholder="80" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                            </div>
+                        </div>
+
+                        <h3 class="text-lg font-semibold mt-6 mb-2">Exercises</h3>
+                        <div id="exercise-entries" class="space-y-3 border p-4 rounded-lg bg-gray-50">
+                            <!-- Initial exercise entry template -->
+                            <div class="exercise-entry grid grid-cols-12 gap-2 items-end">
+                                <div class="col-span-12 sm:col-span-4">
+                                    <label class="block text-xs font-medium text-gray-500">Exercise Name</label>
+                                    <input type="text" class="exercise-name mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" placeholder="e.g., Goblet Squat" required>
+                                </div>
+                                <div class="col-span-3 sm:col-span-2">
+                                    <label class="block text-xs font-medium text-gray-500">Sets</label>
+                                    <input type="number" class="exercise-sets mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" value="3" required>
+                                </div>
+                                <div class="col-span-3 sm:col-span-2">
+                                    <label class="block text-xs font-medium text-gray-500">Reps</label>
+                                    <input type="number" class="exercise-reps mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" value="10" required>
+                                </div>
+                                <div class="col-span-3 sm:col-span-2">
+                                    <label class="block text-xs font-medium text-gray-500">Weight (lbs)</label>
+                                    <input type="number" class="exercise-weight mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" placeholder="40">
+                                </div>
+                                <div class="col-span-3 sm:col-span-2">
+                                    <label class="block text-xs font-medium text-gray-500">RPE (1-10)</label>
+                                    <input type="number" class="exercise-rpe mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" min="1" max="10" placeholder="7">
+                                </div>
+                            </div>
+                            <!-- Repeatable structure ends here -->
+                        </div>
+                        <button type="button" id="add-exercise-btn" class="text-sm text-blue-600 hover:text-blue-800 flex items-center mt-2">
+                            <span data-lucide="plus" class="w-4 h-4 mr-1"></span> Add Another Exercise
+                        </button>
+                        
+                        <button type="submit" class="btn-primary w-full mt-6">
+                            Log Workout Session
+                        </button>
+                        <p id="workout-message" class="text-center mt-2 hidden text-sm"></p>
+                    </form>
+                </div>
+            </section>
+
+            <!-- 3. Daily Habits Tab -->
+            <section id="habits" class="tab-content hidden">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4 section-heading">Daily Check-in & Accountability</h2>
+                <div class="card p-6">
+                    <form id="habit-form" class="space-y-6">
+                        <div class="flex items-center justify-between border-b pb-4">
+                            <label class="text-lg font-medium text-gray-700 flex items-center">
+                                <span data-lucide="ban" class="w-6 h-6 mr-3 text-red-500"></span> No Smoking Today
+                            </label>
+                            <input type="checkbox" name="noSmoke" id="noSmoke" class="h-6 w-6 text-green-600 rounded focus:ring-green-500 border-gray-300">
+                        </div>
+                        <div class="flex items-center justify-between border-b pb-4">
+                            <label class="text-lg font-medium text-gray-700 flex items-center">
+                                <span data-lucide="glass-water" class="w-6 h-6 mr-3 text-red-500"></span> No Alcohol Today
+                            </label>
+                            <input type="checkbox" name="noAlcohol" id="noAlcohol" class="h-6 w-6 text-green-600 rounded focus:ring-green-500 border-gray-300">
+                        </div>
+                        <div class="flex items-center justify-between border-b pb-4">
+                            <label class="text-lg font-medium text-gray-700 flex items-center">
+                                <span data-lucide="accessibility" class="w-6 h-6 mr-3 text-blue-500"></span> Mobility Session (Scoliosis/Longevity)
+                            </label>
+                            <input type="checkbox" name="mobility" id="mobility" class="h-6 w-6 text-green-600 rounded focus:ring-green-500 border-gray-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-lg font-medium text-gray-700 flex items-center">
+                                <span data-lucide="droplets" class="w-6 h-6 mr-3 text-cyan-500"></span> Hit Water Intake Goal
+                            </label>
+                            <input type="checkbox" name="water" id="water" class="h-6 w-6 text-green-600 rounded focus:ring-green-500 border-gray-300">
+                        </div>
+
+                        <div>
+                            <label for="habit-date" class="block text-sm font-medium text-gray-700 mt-4">For Date</label>
+                            <input type="date" id="habit-date" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" value="" required>
+                        </div>
+
+                        <button type="submit" class="btn-primary w-full mt-6">
+                            Record Daily Habits
+                        </button>
+                        <p id="habit-message" class="text-center mt-2 hidden text-sm"></p>
+                    </form>
+
+                    <p class="text-center text-sm text-gray-500 mt-4" id="last-habit-update"></p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, where, writeBatch, runTransaction, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = 'loading';
+
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const authStatus = document.getElementById('auth-status');
+        const rootPath = `/artifacts/${appId}`;
+
+        // Utility function for exponential backoff retry (for API calls outside the scope of this app)
+        const fetchWithRetry = async (url, options, maxRetries = 3) => {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return response;
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    console.warn(`Attempt ${i + 1} failed. Retrying in ${delay}ms...`, error);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        };
+
+        // --- 1. FIREBASE INITIALIZATION AND AUTHENTICATION ---
+        const initializeFirebase = async () => {
+            if (!firebaseConfig) {
+                console.error("Firebase config is missing.");
+                authStatus.textContent = "Status: ERROR (Config Missing)";
+                loadingOverlay.classList.add('hidden');
+                return;
+            }
+
+            setLogLevel('Debug');
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Sign in using the custom token or anonymously if not available
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        authStatus.textContent = `Status: Connected | User ID: ${userId}`;
+                        loadDataListeners(); // Start listening for data changes
+                    } else {
+                        userId = 'anonymous';
+                        authStatus.textContent = "Status: Anonymous (Data is private)";
+                    }
+                    loadingOverlay.classList.add('hidden');
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                authStatus.textContent = `Status: ERROR (${error.message})`;
+                loadingOverlay.classList.add('hidden');
+            }
+        };
+
+        // --- 2. DATA MANAGEMENT FUNCTIONS ---
+
+        const getWorkoutCollection = (uid) => collection(db, `${rootPath}/users/${uid}/workouts`);
+        const getHabitDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/habits`, date);
+        const getMetricsDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/metrics`, date);
+        const getDailySummaryDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/dailySummary`, date);
+
+
+        // Save a workout session
+        const saveWorkoutSession = async (data) => {
+            if (userId === 'loading' || !db) return;
+            try {
+                const workoutRef = getWorkoutCollection(userId);
+                const docRef = await addDoc(workoutRef, {
+                    ...data,
+                    timestamp: new Date(),
+                    date: data.date, // ISO date string
+                });
+                console.log("Workout logged successfully with ID: ", docRef.id);
+                // Also update health metrics if they were logged in the workout form
+                if (data.weight || data.systolic || data.diastolic) {
+                    await saveHealthMetric({
+                        date: data.date,
+                        weight: data.weight,
+                        systolic: data.systolic,
+                        diastolic: data.diastolic
+                    }, 'WorkoutForm');
+                }
+            } catch (e) {
+                console.error("Error adding workout document: ", e);
+                throw new Error("Failed to log workout.");
+            }
+        };
+
+        // Save daily habits and metrics
+        const saveHabitsAndMetrics = async (habitData, metricData) => {
+            if (userId === 'loading' || !db) return;
+            const date = habitData.date;
+            
+            try {
+                await runTransaction(db, async (transaction) => {
+                    // 1. Save Habits
+                    const habitRef = getHabitDocRef(userId, date);
+                    transaction.set(habitRef, { 
+                        ...habitData, 
+                        timestamp: new Date(),
+                        date: date // Store as ISO date string for query
+                    }, { merge: true });
+
+                    // 2. Save Metrics (if provided)
+                    if (metricData.weight || metricData.systolic || metricData.diastolic) {
+                        const metricRef = getMetricsDocRef(userId, date);
+                        transaction.set(metricRef, {
+                            ...metricData,
+                            timestamp: new Date(),
+                            date: date
+                        }, { merge: true });
+                    }
+                });
+                console.log("Habits and Metrics recorded successfully for: ", date);
+            } catch (e) {
+                console.error("Transaction failed: ", e);
+                throw new Error("Failed to record daily progress.");
+            }
+        };
+
+        // Save health metric (used internally by workout log)
+        const saveHealthMetric = async (metricData) => {
+             if (userId === 'loading' || !db) return;
+             const date = metricData.date;
+             try {
+                const metricRef = getMetricsDocRef(userId, date);
+                await setDoc(metricRef, {
+                    ...metricData,
+                    timestamp: new Date(),
+                    date: date,
+                }, { merge: true });
+                console.log("Health metrics updated for: ", date);
+            } catch (e) {
+                console.error("Error updating health metrics: ", e);
+            }
+        }
+
+
+        // --- 3. UI AND EVENT LISTENERS ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set today's date on the date inputs
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('workout-date').value = today;
+            document.getElementById('habit-date').value = today;
+
+            // Initialize Lucide icons
+            lucide.createIcons();
+
+            // Setup tab switching
+            const tabs = document.querySelectorAll('.tab-btn');
+            const contents = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tabs.forEach(t => t.classList.remove('tab-active'));
+                    contents.forEach(c => c.classList.add('hidden'));
+
+                    tab.classList.add('tab-active');
+                    document.getElementById(tab.dataset.tab).classList.remove('hidden');
+                    lucide.createIcons(); // Re-create icons on the newly visible tab
+                });
+            });
+
+            // Initialize Firebase
+            initializeFirebase();
+        });
+
+
+        // Exercise form logic
+        const exerciseEntries = document.getElementById('exercise-entries');
+        const addExerciseBtn = document.getElementById('add-exercise-btn');
+
+        const createExerciseEntry = () => {
+            const entry = document.createElement('div');
+            entry.className = 'exercise-entry grid grid-cols-12 gap-2 items-end mt-3 pt-3 border-t border-gray-200';
+            entry.innerHTML = `
+                <div class="col-span-12 sm:col-span-4">
+                    <label class="block text-xs font-medium text-gray-500">Exercise Name</label>
+                    <input type="text" class="exercise-name mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" placeholder="e.g., Dumbbell Row" required>
+                </div>
+                <div class="col-span-3 sm:col-span-2">
+                    <label class="block text-xs font-medium text-gray-500">Sets</label>
+                    <input type="number" class="exercise-sets mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" value="3" required>
+                </div>
+                <div class="col-span-3 sm:col-span-2">
+                    <label class="block text-xs font-medium text-gray-500">Reps</label>
+                    <input type="number" class="exercise-reps mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" value="10" required>
+                </div>
+                <div class="col-span-3 sm:col-span-2">
+                    <label class="block text-xs font-medium text-gray-500">Weight (lbs)</label>
+                    <input type="number" class="exercise-weight mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" placeholder="40">
+                </div>
+                <div class="col-span-3 sm:col-span-2">
+                    <label class="block text-xs font-medium text-gray-500">RPE (1-10)</label>
+                    <input type="number" class="exercise-rpe mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" min="1" max="10" placeholder="7">
+                </div>
+                <button type="button" class="col-span-12 text-right text-xs text-red-500 remove-exercise-btn">Remove</button>
+            `;
+            entry.querySelector('.remove-exercise-btn').addEventListener('click', () => {
+                entry.remove();
+            });
+            return entry;
+        };
+
+        addExerciseBtn.addEventListener('click', () => {
+            exerciseEntries.appendChild(createExerciseEntry());
+        });
+
+        // Workout Form Submission
+        document.getElementById('workout-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loadingOverlay.classList.remove('hidden');
+            
+            const date = document.getElementById('workout-date').value;
+            const weight = parseFloat(document.getElementById('weight').value);
+            const systolic = parseFloat(document.getElementById('systolic').value);
+            const diastolic = parseFloat(document.getElementById('diastolic').value);
+
+            const exercises = Array.from(document.querySelectorAll('.exercise-entry')).map(entry => {
+                return {
+                    name: entry.querySelector('.exercise-name').value,
+                    sets: parseInt(entry.querySelector('.exercise-sets').value),
+                    reps: parseInt(entry.querySelector('.exercise-reps').value),
+                    weight: parseFloat(entry.querySelector('.exercise-weight').value || 0),
+                    rpe: parseInt(entry.querySelector('.exercise-rpe').value || 0),
+                };
+            }).filter(ex => ex.name); // Only log exercises with a name
+
+            const workoutData = {
+                date,
+                weight: weight || null,
+                systolic: systolic || null,
+                diastolic: diastolic || null,
+                exercises,
+            };
+
+            const messageEl = document.getElementById('workout-message');
+            messageEl.classList.remove('hidden', 'text-green-600', 'text-red-600');
+
+            try {
+                await saveWorkoutSession(workoutData);
+                messageEl.textContent = `Workout logged successfully for ${date}!`;
+                messageEl.classList.add('text-green-600');
+                // Clear exercise entries except the first one
+                Array.from(exerciseEntries.querySelectorAll('.exercise-entry')).slice(1).forEach(el => el.remove());
+                e.target.reset();
+                document.getElementById('workout-date').value = new Date().toISOString().split('T')[0];
+            } catch (error) {
+                messageEl.textContent = `Error: ${error.message}`;
+                messageEl.classList.add('text-red-600');
+            } finally {
+                loadingOverlay.classList.add('hidden');
+            }
+        });
+
+
+        // Habit Form Submission
+        document.getElementById('habit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loadingOverlay.classList.remove('hidden');
+
+            const date = document.getElementById('habit-date').value;
+            const habitData = {
+                date: date,
+                noSmoke: document.getElementById('noSmoke').checked,
+                noAlcohol: document.getElementById('noAlcohol').checked,
+                mobility: document.getElementById('mobility').checked,
+                water: document.getElementById('water').checked,
+            };
+            
+            // Assume the user may also want to log latest weight/BP when logging habits
+            // I will use placeholder metric data here as we don't have separate metric inputs on the habit tab.
+            const metricData = {};
+
+            const messageEl = document.getElementById('habit-message');
+            messageEl.classList.remove('hidden', 'text-green-600', 'text-red-600');
+
+            try {
+                await saveHabitsAndMetrics(habitData, metricData);
+                messageEl.textContent = `Daily habits recorded successfully for ${date}!`;
+                messageEl.classList.add('text-green-600');
+            } catch (error) {
+                messageEl.textContent = `Error: ${error.message}`;
+                messageEl.classList.add('text-red-600');
+            } finally {
+                loadingOverlay.classList.add('hidden');
+                // The onSnapshot listener will update the dashboard
+            }
+        });
+
+
+        // --- 4. DATA LISTENERS AND RENDERING ---
+
+        const loadDataListeners = () => {
+            if (userId === 'loading' || !db) return;
+
+            // Workout Listener (for Recent Workouts)
+            const workoutQuery = query(getWorkoutCollection(userId), orderBy("timestamp", "desc"));
+            onSnapshot(workoutQuery, (snapshot) => {
+                const workouts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderRecentWorkouts(workouts);
+            }, (error) => {
+                console.error("Error fetching workouts:", error);
+            });
+
+            // Metrics Listener (for Latest Weight/BP)
+            const metricsQuery = query(collection(db, `${rootPath}/users/${userId}/metrics`), orderBy("date", "desc"));
+            onSnapshot(metricsQuery, (snapshot) => {
+                const metrics = snapshot.docs.map(doc => doc.data());
+                renderLatestMetrics(metrics);
+            }, (error) => {
+                console.error("Error fetching metrics:", error);
+            });
+
+            // Habits Listener (for Compliance and Streak)
+            const habitsQuery = query(collection(db, `${rootPath}/users/${userId}/habits`), orderBy("date", "desc"));
+            onSnapshot(habitsQuery, (snapshot) => {
+                const habits = snapshot.docs.map(doc => doc.data());
+                renderHabitCompliance(habits);
+                calculateAndRenderStreak(habits);
+            }, (error) => {
+                console.error("Error fetching habits:", error);
+            });
+        };
+
+        const renderRecentWorkouts = (workouts) => {
+            const list = document.getElementById('recent-workouts-list');
+            list.innerHTML = '';
+
+            if (workouts.length === 0) {
+                list.innerHTML = '<p class="text-gray-500 text-center">No workouts logged yet. Start training!</p>';
+                return;
+            }
+
+            // Display up to 5 recent workouts
+            workouts.slice(0, 5).forEach(workout => {
+                const date = new Date(workout.date).toLocaleDateString();
+                const totalExercises = workout.exercises ? workout.exercises.length : 0;
+                
+                const workoutDiv = document.createElement('div');
+                workoutDiv.className = 'log-entry p-3 rounded-lg border border-gray-200';
+                workoutDiv.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <p class="font-semibold text-gray-800">${date} - ${totalExercises} Exercises Logged</p>
+                        <button class="text-sm text-blue-600 hover:text-blue-800 view-details-btn">View Details</button>
+                    </div>
+                    <div class="exercise-details hidden mt-2 text-xs space-y-1">
+                        ${workout.exercises.map(ex => 
+                            `<p class="text-gray-600 pl-2">
+                                <span class="font-medium">${ex.name}:</span> 
+                                ${ex.sets} sets of ${ex.reps} @ ${ex.weight}lbs (RPE: ${ex.rpe})
+                            </p>`
+                        ).join('')}
+                    </div>
+                `;
+                
+                // Toggle details visibility
+                workoutDiv.querySelector('.view-details-btn').addEventListener('click', (e) => {
+                    const details = workoutDiv.querySelector('.exercise-details');
+                    details.classList.toggle('hidden');
+                    e.target.textContent = details.classList.contains('hidden') ? 'View Details' : 'Hide Details';
+                });
+
+                list.appendChild(workoutDiv);
+            });
+        };
+
+        const renderLatestMetrics = (metrics) => {
+            const latestWeightEl = document.getElementById('latest-weight');
+            const latestBPEl = document.getElementById('latest-bp');
+
+            if (metrics.length === 0) {
+                latestWeightEl.textContent = '--';
+                latestBPEl.textContent = '--';
+                return;
+            }
+
+            const latestMetric = metrics.find(m => m.weight || (m.systolic && m.diastolic));
+
+            if (latestMetric) {
+                latestWeightEl.textContent = latestMetric.weight ? `${latestMetric.weight}` : '--';
+                latestBPEl.textContent = (latestMetric.systolic && latestMetric.diastolic) ? 
+                    `${latestMetric.systolic}/${latestMetric.diastolic}` : '--';
+            } else {
+                 latestWeightEl.textContent = '--';
+                 latestBPEl.textContent = '--';
+            }
+        };
+
+        const renderHabitCompliance = (habits) => {
+            const body = document.getElementById('habit-compliance-body');
+            body.innerHTML = '';
+            
+            // Get last 7 unique dates
+            const uniqueDates = Array.from(new Set(habits.map(h => h.date)))
+                .sort((a, b) => new Date(b) - new Date(a)) // Sort Descending
+                .slice(0, 7);
+            
+            if (uniqueDates.length === 0) {
+                 body.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">No habit data available.</td></tr>';
+                 return;
+            }
+
+            uniqueDates.forEach(dateStr => {
+                const habit = habits.find(h => h.date === dateStr); // Should only be one per date
+                
+                const dateDisplay = new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                
+                const getIcon = (isComplete) => {
+                    if (isComplete) {
+                        return '<span data-lucide="check" class="w-5 h-5 text-green-500 mx-auto"></span>';
+                    }
+                    return '<span data-lucide="x" class="w-5 h-5 text-red-500 mx-auto"></span>';
+                }
+
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-100';
+                row.innerHTML = `
+                    <td class="p-2 font-medium">${dateDisplay}</td>
+                    <td class="p-2 text-center">${getIcon(habit.noSmoke)}</td>
+                    <td class="p-2 text-center">${getIcon(habit.noAlcohol)}</td>
+                    <td class="p-2 text-center">${getIcon(habit.mobility)}</td>
+                    <td class="p-2 text-center">${getIcon(habit.water)}</td>
+                `;
+                body.appendChild(row);
+            });
+            
+            // Re-create icons for the new table content
+            lucide.createIcons();
+        };
+
+        const calculateAndRenderStreak = (habits) => {
+            const streakCounter = document.getElementById('streak-counter');
+            let streak = 0;
+
+            // Map habits to a more usable object keyed by date (ISO string)
+            const habitsByDate = habits.reduce((acc, h) => {
+                acc[h.date] = h;
+                return acc;
+            }, {});
+
+            // Get a sorted list of all dates logged
+            const sortedDates = Object.keys(habitsByDate).sort(); // Sort Ascending
+
+            let currentDate = new Date();
+            currentDate.setHours(0, 0, 0, 0);
+
+            // Function to get previous day ISO string
+            const getPreviousDay = (date) => {
+                const prev = new Date(date);
+                prev.setDate(prev.getDate() - 1);
+                return prev.toISOString().split('T')[0];
+            };
+
+            // Check yesterday's date first, as today might not be logged yet
+            let checkDate = currentDate;
+
+            // If today's date has passed, check today's date, otherwise check yesterday's date
+            // Start check from the current day's date string
+            let checkDateStr = checkDate.toISOString().split('T')[0];
+
+            // 1. Check if today's habits are complete. If so, start the streak count.
+            if (habitsByDate[checkDateStr] && 
+                habitsByDate[checkDateStr].noSmoke && 
+                habitsByDate[checkDateStr].noAlcohol && 
+                habitsByDate[checkDateStr].mobility && 
+                habitsByDate[checkDateStr].water) {
+                streak = 1;
+            } else {
+                // If today is not complete, check yesterday
+                checkDateStr = getPreviousDay(checkDate);
+            }
+
+            // 2. Iterate backwards from the start date (either today or yesterday)
+            while (habitsByDate[checkDateStr]) {
+                const h = habitsByDate[checkDateStr];
+                if (h.noSmoke && h.noAlcohol && h.mobility && h.water) {
+                    // Only increment if we didn't already count today
+                    if (streak > 0 || checkDateStr !== currentDate.toISOString().split('T')[0]) {
+                        streak++;
+                    }
+                } else {
+                    // Streak broken
+                    break;
+                }
+                checkDateStr = getPreviousDay(new Date(checkDateStr));
+            }
+            
+            streakCounter.textContent = streak > 0 ? streak : '0';
+        }
+    </script>
+</body>
+</html>
