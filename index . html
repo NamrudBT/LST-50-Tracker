@@ -36,7 +36,7 @@
         }
 
         .btn-primary:hover {
-            background-color: #1d4ed8; 
+            background-color: #1d4edc; 
         }
 
         .tab-active {
@@ -93,13 +93,18 @@
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="hidden">
         <div class="spinner"></div>
-        <p class="mt-4 text-gray-700">Loading data and securing connection...</p>
+        <p class="mt-4 text-gray-700">Loading application...</p>
     </div>
 
     <!-- Main Application Container -->
     <div class="max-w-4xl mx-auto p-4 md:p-8">
         <header class="text-center mb-6">
             <h1 class="text-4xl font-bold text-gray-800">LST-50 Tracker</h1>
+            <!-- WARNING MESSAGE FOR GITHUB USERS -->
+            <div id="github-warning" class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mt-2 hidden" role="alert">
+                <p class="font-bold">⚠️ Data Tracking Disabled ⚠️</p>
+                <p class="text-sm">This app is running in **Demo Mode**. Database functionality (saving data) is only active when loaded inside the original Canvas environment.</p>
+            </div>
             <p id="auth-status" class="text-sm text-gray-500 mt-1">Status: Initializing...</p>
         </header>
 
@@ -125,7 +130,7 @@
                 <!-- Streak and Metrics Summary -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                     <div class="card p-6 text-center bg-green-500 text-white">
-                        <p class="text-5xl font-extrabold" id="streak-counter">0</p>
+                        <p class="text-5xl font-extrabold" id="streak-counter">--</p>
                         <p class="text-sm mt-1">Habit Streak (Days)</p>
                     </div>
                     <div class="card p-6 text-center">
@@ -141,7 +146,7 @@
                 <!-- Latest Workout Log -->
                 <h3 class="text-xl font-medium text-gray-700 mb-3 section-heading">Recent Workouts</h3>
                 <div id="recent-workouts-list" class="space-y-2 card p-4">
-                    <p class="text-gray-500 text-center">No workouts logged yet. Start training!</p>
+                    <p class="text-gray-500 text-center">Loading workouts...</p>
                 </div>
 
                 <!-- Habit Log -->
@@ -158,7 +163,6 @@
                             </tr>
                         </thead>
                         <tbody id="habit-compliance-body" class="divide-y divide-gray-200">
-                            <!-- Habit compliance rows will be injected here -->
                             <tr><td colspan="5" class="text-center py-4 text-gray-500">Loading habit data...</td></tr>
                         </tbody>
                     </table>
@@ -216,7 +220,6 @@
                                     <input type="number" class="exercise-rpe mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm" min="1" max="10" placeholder="7">
                                 </div>
                             </div>
-                            <!-- Repeatable structure ends here -->
                         </div>
                         <button type="button" id="add-exercise-btn" class="text-sm text-blue-600 hover:text-blue-800 flex items-center mt-2">
                             <span data-lucide="plus" class="w-4 h-4 mr-1"></span> Add Another Exercise
@@ -279,42 +282,66 @@
 
     <!-- Firebase SDK Imports -->
     <script type="module">
-        // --- Import Firebase libraries first ---
+        // --- Import Firebase libraries first (only needed if we find config) ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, query, orderBy, runTransaction, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Global variables provided by the environment, safely retrieved ---
-        // This defensive check prevents the app from crashing on a blank screen if the variables are undefined.
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+        // --- GLOBAL STATE ---
+        // CRITICAL FIX: Explicitly set config variables to null if they are not defined
+        const githubMode = true; 
+        
         let db;
         let auth;
-        let userId = 'loading';
+        let userId = null;
         let isFirebaseReady = false;
+        let rootPath = 'demo/app/v1'; // Default path for demo mode
 
         const loadingOverlay = document.getElementById('loading-overlay');
         const authStatus = document.getElementById('auth-status');
-        const rootPath = `/artifacts/${appId}`;
+        const githubWarning = document.getElementById('github-warning');
 
-        // --- 1. FIREBASE INITIALIZATION AND AUTHENTICATION ---
+        // --- 1. FIREBASE INITIALIZATION AND AUTHENTICATION (Now handles missing config gracefully) ---
         const initializeFirebase = async () => {
+            // Check for the Canvas environment variables.
+            let firebaseConfig = null;
+            let initialAuthToken = null;
+            let appId = 'github-demo';
+            
+            try {
+                // If the app is running in the Canvas environment, these will be defined globally.
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                    initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    rootPath = `/artifacts/${appId}`;
+                    githubWarning.classList.add('hidden'); // Hide warning if in Canvas
+                }
+            } catch (e) {
+                console.error("Error reading environment config:", e);
+                // Fall through to Demo Mode if variables are present but corrupted
+            }
+
             if (!firebaseConfig) {
-                authStatus.textContent = "Status: ERROR (Config Missing)";
+                authStatus.textContent = "Status: Demo Mode (No Database Connection)";
+                githubWarning.classList.remove('hidden');
+                isFirebaseReady = false;
                 loadingOverlay.classList.add('hidden');
+                // Render initial empty state immediately in demo mode
+                renderRecentWorkouts([]);
+                renderLatestMetrics([]);
+                renderHabitCompliance([]);
                 return;
             }
 
+            // --- DATABASE INITIALIZATION (Only runs if config is found) ---
             setLogLevel('Debug');
             try {
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Sign in using the custom token or anonymously if not available
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
@@ -335,19 +362,25 @@
                 });
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
-                authStatus.textContent = `Status: ERROR (${error.message})`;
+                authStatus.textContent = `Status: ERROR (${error.message}). Running in Demo Mode.`;
+                githubWarning.classList.remove('hidden');
                 loadingOverlay.classList.add('hidden');
+                
+                // Fallback rendering in case of connection error
+                renderRecentWorkouts([]);
+                renderLatestMetrics([]);
+                renderHabitCompliance([]);
             }
         };
 
-        // --- 2. DATA MANAGEMENT FUNCTIONS (same logic as before) ---
+        // --- 2. DATA MANAGEMENT FUNCTIONS (same logic as before, with safety check) ---
 
         const getWorkoutCollection = (uid) => collection(db, `${rootPath}/users/${uid}/workouts`);
         const getHabitDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/habits`, date);
         const getMetricsDocRef = (uid, date) => doc(db, `${rootPath}/users/${uid}/metrics`, date);
 
         const saveWorkoutSession = async (data) => {
-            if (!isFirebaseReady) throw new Error("Database not initialized.");
+            if (!isFirebaseReady) throw new Error("Database not initialized. (Demo Mode)");
             try {
                 const docRef = await addDoc(getWorkoutCollection(userId), {
                     ...data,
@@ -369,7 +402,7 @@
         };
 
         const saveHabitsAndMetrics = async (habitData, metricData) => {
-            if (!isFirebaseReady) throw new Error("Database not initialized.");
+            if (!isFirebaseReady) throw new Error("Database not initialized. (Demo Mode)");
             const date = habitData.date;
             
             try {
@@ -472,8 +505,12 @@
                 </div>
                 <button type="button" class="col-span-12 text-right text-xs text-red-500 remove-exercise-btn">Remove</button>
             `;
-            entry.querySelector('.remove-exercise-btn').addEventListener('click', () => {
-                entry.remove();
+            entry.querySelector('.remove-exercise-btn').addEventListener('click', (e) => {
+                if(exerciseEntries.querySelectorAll('.exercise-entry').length > 1) {
+                    entry.remove();
+                } else {
+                    alert("You must have at least one exercise entry.");
+                }
             });
             return entry;
         };
@@ -513,6 +550,13 @@
             const messageEl = document.getElementById('workout-message');
             messageEl.classList.remove('hidden', 'text-green-600', 'text-red-600');
 
+            if (!isFirebaseReady) {
+                messageEl.textContent = `[Demo Mode]: Workout data for ${date} processed locally but not saved.`;
+                messageEl.classList.add('text-green-600');
+                loadingOverlay.classList.add('hidden');
+                return;
+            }
+
             try {
                 await saveWorkoutSession(workoutData);
                 messageEl.textContent = `Workout logged successfully for ${date}!`;
@@ -544,10 +588,17 @@
                 water: document.getElementById('water').checked,
             };
             
-            const metricData = {}; // No metric inputs on habit tab
+            const metricData = {};
 
             const messageEl = document.getElementById('habit-message');
             messageEl.classList.remove('hidden', 'text-green-600', 'text-red-600');
+
+            if (!isFirebaseReady) {
+                 messageEl.textContent = `[Demo Mode]: Habit data for ${date} processed locally but not saved.`;
+                 messageEl.classList.add('text-green-600');
+                 loadingOverlay.classList.add('hidden');
+                 return;
+            }
 
             try {
                 await saveHabitsAndMetrics(habitData, metricData);
@@ -562,10 +613,32 @@
         });
 
 
-        // --- 4. DATA LISTENERS AND RENDERING ---
+        // --- 4. DATA LISTENERS AND RENDERING (Mocked data for GitHub) ---
 
         const loadDataListeners = () => {
-            if (!isFirebaseReady) return;
+            if (!isFirebaseReady) {
+                // Mock data loading for GitHub/Demo Mode
+                const mockWorkouts = [
+                    { date: '2025-10-18', exercises: [{ name: 'Deadlift', sets: 3, reps: 5, weight: 225, rpe: 8 }] },
+                    { date: '2025-10-15', exercises: [{ name: 'OHP', sets: 4, reps: 8, weight: 95, rpe: 7 }] }
+                ];
+                const mockMetrics = [
+                    { date: '2025-10-21', weight: 185.2, systolic: 120, diastolic: 80 },
+                    { date: '2025-10-18', weight: 186.0, systolic: 122, diastolic: 82 }
+                ];
+                const mockHabits = [
+                    { date: '2025-10-21', noSmoke: true, noAlcohol: true, mobility: true, water: true },
+                    { date: '2025-10-20', noSmoke: true, noAlcohol: false, mobility: true, water: true },
+                    { date: '2025-10-19', noSmoke: true, noAlcohol: true, mobility: true, water: true },
+                ];
+                renderRecentWorkouts(mockWorkouts);
+                renderLatestMetrics(mockMetrics);
+                renderHabitCompliance(mockHabits);
+                calculateAndRenderStreak(mockHabits);
+                return;
+            }
+            
+            // --- Firebase Listeners (Only active if isFirebaseReady is true) ---
 
             // Workout Listener (for Recent Workouts)
             const workoutQuery = query(getWorkoutCollection(userId), orderBy("timestamp", "desc"));
@@ -634,6 +707,7 @@
 
                 list.appendChild(workoutDiv);
             });
+            lucide.createIcons();
         };
 
         const renderLatestMetrics = (metrics) => {
@@ -649,7 +723,7 @@
             const latestMetric = metrics.find(m => m.weight || (m.systolic && m.diastolic));
 
             if (latestMetric) {
-                latestWeightEl.textContent = latestMetric.weight ? `${latestMetric.weight}` : '--';
+                latestWeightEl.textContent = latestMetric.weight ? `${latestMetric.weight.toFixed(1)}` : '--';
                 latestBPEl.textContent = (latestMetric.systolic && latestMetric.diastolic) ? 
                     `${latestMetric.systolic}/${latestMetric.diastolic}` : '--';
             } else {
@@ -733,7 +807,7 @@
             if (!isTodayComplete) {
                 checkDateStr = getPreviousDay(currentDate);
             } else {
-                checkDateStr = getPreviousDay(new Date(checkDateStr)); // Start from the day before today
+                checkDateStr = getPreviousDay(new Date(checkDateStr)); 
             }
 
 
